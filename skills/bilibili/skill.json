@@ -1,0 +1,60 @@
+{
+  "name": "bilibili",
+  "title": "逛 B 站",
+  "version": "0.2.0",
+  "api_version": 1,
+  "description": "搜索/观看 B 站视频、读评论字幕弹幕、发评论和私信、管理收藏。只在用户提到 B 站相关场景时激活。",
+  "when_to_use": "用户提到 B 站、bilibili、UP 主、看视频、评论、私信、投稿、收藏，或定时巡检 B 站账号",
+  "activation": {
+    "mode": "lazy",
+    "idle_timeout_minutes": 10
+  },
+  "entry": "SKILL.md",
+  "instructions": {
+    "persona": "instructions/persona.md",
+    "rules": "instructions/rules.md",
+    "tools": "instructions/tools.md",
+    "patrol": "instructions/patrol.md"
+  },
+  "mcp": {
+    "server": "bilibili",
+    "transport": "stdio",
+    "command": "python",
+    "command_env": "BILI_SKILL_PYTHON",
+    "args": ["run_mcp.py"],
+    "cwd": "."
+  },
+  "patrol": {
+    "enabled": false,
+    "interval_minutes": 30,
+    "instructions": "instructions/patrol.md",
+    "check_tools": [
+      "bili_unread_messages",
+      "bili_received_replies",
+      "bili_recent_messages"
+    ]
+  },
+  "tools": {
+    "write": [
+      "bili_reply",
+      "bili_favorite",
+      "bili_send_message",
+      "bili_send_sticker",
+      "bili_send_dynamic",
+      "bili_send_opus"
+    ],
+    "human_only": [
+      "bili_login",
+      "bili_login_check",
+      "bili_upload_video",
+      "bili_upload_video_multi"
+    ],
+    "message": ["bili_send_message", "bili_send_sticker"]
+  },
+  "limits": {
+    "enforced_by": "host",
+    "dynamic_per_day": 1,
+    "whitelist_exempt": true
+  },
+  "local_tools": ["agent_avoid"]
+}

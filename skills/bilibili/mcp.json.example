@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "bilibili": {
+      "command": "<项目路径>/.venv/Scripts/python.exe",
+      "args": ["<项目路径>/skills/bilibili/run_mcp.py"],
+      "env": {
+        "BILI_SKILL_ROOT": "<项目路径>",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

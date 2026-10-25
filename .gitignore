@@ -1,0 +1,78 @@
+# 凭证文件（包含登录信息，切勿提交）
+bili_credential.json
+
+# LLM 密钥（.env.example 是模板，可以提交）
+.env
+.env.local
+.env.*.local
+
+# 本机可调参数（由桌面设置界面写入；.env.example 有全部字段说明）
+config.json
+
+# 登录二维码（临时文件）
+qrcode_login.png
+
+# 操作审计日志（可能包含账号互动内容）
+logs/
+
+# 运行时数据与大块落盘内容（含抓取内容、绘画产物、个人形象与表情包）
+data/*
+# 只保留说明文档；立绘、描述和表情包属于个人素材，默认不纳入版本管理
+!data/self/
+data/self/*
+!data/self/README.md
+!data/self/stickers/
+data/self/stickers/*
+!data/self/stickers/README.md
+data/self/*.view.jpg
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+# 凭证备份与遗留文件（bili_credential.json.bak 等，含登录信息）
+bili_credential.json*
+*.bak
+*.bak-*
+*.tmp.*
+
+# 本机 IDE / 工具本地配置
+.claude/settings.local.json
+.claude/settings.json
+.claude/CLAUDE.local.md
+
+# 本机 MCP 配置（含本机路径；模板见 skills/bilibili/mcp.json.example）
+.mcp.json
+
+# 其他环境文件与测试产物
+.env.*
+!.env.example
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite
+*.sqlite3
+*.log
