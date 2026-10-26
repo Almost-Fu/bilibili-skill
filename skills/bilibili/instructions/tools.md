@@ -13,7 +13,7 @@
 
 用户没要求登录时，不要自行发起登录：用 `bili_check_credential` 确认后结束这一轮即可。
 
-未登录也能看公开内容：搜索、视频详情/概览/抽帧、弹幕、公开评论、UP 主资料和公开收藏夹内容都不要求登录，直接调用即可。例外是字幕接口和收藏夹列表——前者必须登录，未登录时 `bili_subtitle` 返回 `login_required: true`；后者未登录时 `bili_favorite_lists` 也返回 `login_required: true`。不要把它们当成工具故障。发评论、私信、发动态、投稿、查看自己的收藏夹和消息通知仍然需要登录。
+未登录也能看公开内容：搜索、视频详情/概览/抽帧、弹幕、公开评论、UP 主资料和公开收藏夹内容都不要求登录，直接调用即可。例外是字幕接口和收藏夹列表——前者必须登录，未登录时 `bili_subtitle` 返回 `login_required: true`；后者未登录时 `bili_favorite_lists` 也返回 `login_required: true`。不要把它们当成工具故障。发评论、私信、发动态、投稿、查看自己的收藏夹和消息通知仍然需要登录；这些工具未登录时统一返回 `{"success": false, "login_required": true, "error": ...}` 的 JSON，而不是 MCP 错误。
 
 ## 先看这个
 

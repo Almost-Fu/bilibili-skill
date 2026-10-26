@@ -23,7 +23,7 @@ python skills/bilibili/run_mcp.py --check   # 检查仓库根和依赖
 
 凭证保存在本地 `bili_credential.json`，会自动续期；不要提交或分享。
 
-不登录也能读公开内容：搜索、视频详情/概览/抽帧、弹幕、评论、UP 主资料和公开收藏夹内容。字幕、收藏夹列表、发评论/私信/动态、投稿、自己的收藏夹和消息通知需要登录。
+不登录也能读公开内容：搜索、视频详情/概览/抽帧、弹幕、评论、UP 主资料和公开收藏夹内容。字幕、收藏夹列表、发评论/私信/动态、投稿、自己的收藏夹和消息通知需要登录，未登录时返回 `login_required: true` 的结构化 JSON。
 
 可调参数优先级：环境变量 > `config.json` > 默认值。示例：
 
@@ -92,10 +92,10 @@ Claude Code 不执行 `skill.json` 的懒启动、巡检和写入名单，写入
 | 分类 | 工具 |
 |---|---|
 | 登录 | `bili_login`、`bili_login_check`、`bili_check_credential` |
-| 数据采集 | `bili_search`、`bili_comments`、`bili_subtitle`、`bili_danmaku`、`bili_video_info`、`bili_video_overview`、`bili_video_frames`、`bili_reply`、`bili_crawl` |
+| 数据采集 | `bili_search`、`bili_comments`、`bili_subtitle`、`bili_danmaku`、`bili_video_info`、`bili_video_overview`、`bili_video_frames`、`bili_crawl` |
 | 内容发布 | `bili_self_image`、`bili_generate_image`、`bili_send_dynamic`、`bili_upload_video`、`bili_upload_video_multi`、`bili_send_opus`、`bili_video_zones` |
 | 数据分析 | `bili_hot_videos`、`bili_hot_buzzwords`、`bili_weekly_hot`、`bili_rank`、`bili_user_info`、`bili_user_videos`、`bili_space_dynamics` |
-| 互动运营 | `bili_favorite_lists`、`bili_favorite_content`、`bili_favorite`、`bili_send_message`、`bili_sticker_list`、`bili_send_sticker`、`bili_unread_messages`、`bili_recent_messages`、`bili_received_replies`、`bili_received_at_and_likes`、`bili_activity_log` |
+| 互动运营 | `bili_reply`、`bili_favorite_lists`、`bili_favorite_content`、`bili_favorite`、`bili_send_message`、`bili_sticker_list`、`bili_send_sticker`、`bili_unread_messages`、`bili_recent_messages`、`bili_received_replies`、`bili_received_at_and_likes`、`bili_activity_log` |
 
 工具参数和限制见 [instructions/tools.md](skills/bilibili/instructions/tools.md)。视频超过 60 分钟直接拒绝；超过 20 分钟先征得主人同意。
 

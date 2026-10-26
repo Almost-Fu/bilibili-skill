@@ -63,6 +63,14 @@ mcp = FastMCP("bilibili-skill")
 _credentials = CredentialManager(CRED_FILE)
 _login_session: QrLogin | None = None
 
+LOGIN_HINT = (
+    "未登录B站！请先调用 bili_login 工具获取登录二维码，让用户扫码登录。"
+)
+
+
+class NotLoggedInError(Exception):
+    """本地没有可用凭证；工具层会把它转成结构化 login_required。"""
+
 
 def load_credential():
     """读取本地凭证；文件不存在或关键字段为空时返回 None。"""
@@ -70,13 +78,25 @@ def load_credential():
 
 
 async def get_cred():
-    """取一份可用凭证，需要时顺带刷新，未登录时给出明确提示。"""
+    """取一份可用凭证，需要时顺带刷新；未登录时抛 ``NotLoggedInError``。"""
     cred = await _credentials.get()
     if not cred:
-        raise Exception(
-            "未登录B站！请先调用 bili_login 工具获取登录二维码，让用户扫码登录。"
-        )
+        raise NotLoggedInError(LOGIN_HINT)
     return cred
+
+
+async def get_cred_or_error() -> tuple[Any, str | None]:
+    """需要登录的工具入口，返回 ``(凭证, 登录提示 JSON)``。
+
+    预期内的“未登录”走结构化返回，不抛 MCP isError；网络/接口故障仍然
+    由各工具自己处理。
+    """
+    try:
+        return await get_cred(), None
+    except NotLoggedInError:
+        return None, _json(
+            {"success": False, "login_required": True, "error": LOGIN_HINT}
+        )
 
 
 async def get_cred_optional():
@@ -664,10 +684,24 @@ async def bili_video_info(bvid: str = "", aid: int = 0) -> str:
     """
     if not bvid and not aid:
         return _json({"error": "请提供 bvid 或 aid"})
-    _cred, _client, info = await _open_video(
+    _cred, client, info = await _open_video(
         bvid, aid=aid, require_login=False
     )
     stat = info.get("stat") or {}
+    # get_info() 不返回标签，需要单独请求；失败时保持空列表，不影响详情。
+    tag_rows = info.get("tag")
+    if not isinstance(tag_rows, list) or not tag_rows:
+        try:
+            tag_rows = await client.get_tags()
+        except Exception:
+            tag_rows = []
+    if not isinstance(tag_rows, list):
+        tag_rows = []
+    tags = [
+        row.get("tag_name")
+        for row in tag_rows
+        if isinstance(row, dict) and row.get("tag_name")
+    ]
     return _json(
         {
             "bvid": info.get("bvid"),
@@ -678,11 +712,7 @@ async def bili_video_info(bvid: str = "", aid: int = 0) -> str:
             "author": (info.get("owner") or {}).get("name"),
             "duration": info.get("duration"),
             "pages": len(info.get("pages", [])),
-            "tags": [
-                tag.get("tag_name")
-                for tag in info.get("tag", [])
-                if tag.get("tag_name")
-            ],
+            "tags": tags,
             "stat": {
                 "view": stat.get("view", 0),
                 "danmaku": stat.get("danmaku", 0),
@@ -947,7 +977,12 @@ async def bili_reply(
         if image_error:
             return _json({"success": False, "error": image_error})
 
-    cred, client, info = await _open_video(bvid)
+    try:
+        cred, client, info = await _open_video(bvid)
+    except NotLoggedInError:
+        return _json(
+            {"success": False, "login_required": True, "error": LOGIN_HINT}
+        )
     aid = info["aid"]
 
     owner = info.get("owner") or {}
@@ -1271,7 +1306,9 @@ async def bili_send_dynamic(
     except bili_images.ImageSourceError as exc:
         return _json({"success": False, "error": str(exc)})
 
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     item = dynamic.BuildDynamic.empty()
     item.add_plain_text(text.strip())
     for path in resolved:
@@ -1347,7 +1384,9 @@ async def bili_upload_video(
         if cover_error:
             return _json({"success": False, "error": cover_error})
 
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     phase = {"value": "初始化"}
     try:
         page = VideoUploaderPage(
@@ -1451,7 +1490,9 @@ async def bili_upload_video_multi(
             )
         )
 
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     original = not bool(source and source.strip())
     try:
         meta = VideoMeta(
@@ -1509,7 +1550,9 @@ async def bili_send_opus(
     except bili_images.ImageSourceError as exc:
         return _json({"success": False, "error": str(exc)})
 
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     item = dynamic.BuildDynamic.empty()
     item.add_plain_text(f"【{title.strip()}】\n\n{content.strip()}")
     for path in resolved:
@@ -1718,6 +1761,9 @@ async def bili_rank(category: str = "all", day: int = 3) -> str:
 async def bili_user_info(uid: int) -> str:
     """获取用户资料、粉丝数和 UP 主累计数据。
 
+    未登录时累计数据接口不可用，``likes`` / ``archive_view`` /
+    ``article_view`` 返回 null，并带 ``stats_unavailable: true``。
+
     Args:
         uid: 用户 UID
 
@@ -1729,10 +1775,13 @@ async def bili_user_info(uid: int) -> str:
     info = await account.get_user_info()
 
     up_stat: dict[str, Any] = {}
+    stats_available = True
+    stats_error = ""
     try:
         up_stat = await account.get_up_stat()
-    except Exception:
-        up_stat = {}
+    except Exception as exc:
+        stats_available = False
+        stats_error = f"{type(exc).__name__}: {exc}"
 
     relation: dict[str, Any] = {}
     try:
@@ -1740,24 +1789,29 @@ async def bili_user_info(uid: int) -> str:
     except Exception:
         relation = {}
 
-    return _json(
-        {
-            "uid": uid,
-            "name": info.get("name", ""),
-            "sign": info.get("sign", ""),
-            "level": info.get("level", 0),
-            "face": info.get("face", ""),
-            "fans": relation.get("follower", info.get("follower", 0)),
-            "following": relation.get(
-                "following", info.get("following", 0)
-            ),
-            "likes": up_stat.get("likes", 0),
-            "archive_view": (up_stat.get("archive") or {}).get("view", 0),
-            "article_view": (up_stat.get("article") or {}).get("view", 0),
-            "is_senior_member": info.get("is_senior_member", 0),
-            "top_photo": info.get("top_photo", ""),
-        }
-    )
+    payload: dict[str, Any] = {
+        "uid": uid,
+        "name": info.get("name", ""),
+        "sign": info.get("sign", ""),
+        "level": info.get("level", 0),
+        "face": info.get("face", ""),
+        "fans": relation.get("follower", info.get("follower", 0)),
+        "following": relation.get("following", info.get("following", 0)),
+        "is_senior_member": info.get("is_senior_member", 0),
+        "top_photo": info.get("top_photo", ""),
+    }
+    if stats_available:
+        payload["likes"] = up_stat.get("likes", 0)
+        payload["archive_view"] = (up_stat.get("archive") or {}).get("view", 0)
+        payload["article_view"] = (up_stat.get("article") or {}).get("view", 0)
+    else:
+        # 不要用 0 冒充“没有数据”：未登录时这就是不可用。
+        payload["likes"] = None
+        payload["archive_view"] = None
+        payload["article_view"] = None
+        payload["stats_unavailable"] = True
+        payload["stats_error"] = stats_error
+    return _json(payload)
 
 
 @mcp.tool()
@@ -1861,24 +1915,37 @@ async def bili_favorite_lists(uid: int = 0) -> str:
         JSON：uid、count 和 lists
     """
     owner = int(uid or 0)
-    # uid=0 表示“当前账号”，必须先知道登录的是谁，所以要求凭证；指定
-    # uid 时用可选凭证，让未登录调用返回结构化 login_required 而不是抛异常。
-    cred = await get_cred() if owner == 0 else await get_cred_optional()
+    cred = await get_cred_optional()
     if owner == 0:
-        data = json.loads(CRED_FILE.read_text(encoding="utf-8"))
-        owner = int(data.get("dedeuserid") or 0)
+        # uid=0 表示“当前账号”：直接从凭证取 UID，未登录则结构化提示。
+        owner = int(getattr(cred, "dedeuserid", 0) or 0)
+        if owner == 0:
+            return _json(
+                {
+                    "uid": 0,
+                    "success": False,
+                    "login_required": True,
+                    "error": LOGIN_HINT,
+                }
+            )
 
     response = await favorite_list.get_video_favorite_list(
         uid=owner, credential=cred
     )
     if response is None:
         # 未登录时 B 站对 list-all 返回 code=0 但 data=null：不报错，
-        # 也拿不到任何收藏夹。明确告诉 Agent 这是登录问题，不是“没有”。
+        # 也拿不到任何收藏夹。区分“未登录”和“对方没公开”。
+        logged_in = bool(getattr(cred, "sessdata", None))
         return _json(
             {
                 "uid": owner,
-                "login_required": True,
-                "message": "未登录时 B 站不返回收藏夹列表，请登录后重试。",
+                "success": False,
+                "login_required": not logged_in,
+                "error": (
+                    "未登录时 B 站不返回收藏夹列表，请登录后重试。"
+                    if not logged_in
+                    else "B 站未返回收藏夹列表，对方可能没有公开收藏夹。"
+                ),
             }
         )
     lists = [
@@ -1958,7 +2025,9 @@ async def bili_favorite(
     Returns:
         JSON：success、message、bvid、media_id 和收藏夹名称
     """
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     folder_id = int(media_id or 0)
     folder_name = "默认收藏夹"
 
@@ -2035,7 +2104,9 @@ async def bili_send_message(
         if image_error:
             return _json({"success": False, "error": image_error})
 
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     sent: dict[str, bool] = {}
     errors: list[str] = []
 
@@ -2221,7 +2292,9 @@ async def bili_unread_messages() -> str:
     Returns:
         未读消息接口的 JSON 数据
     """
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     try:
         result = await retry_network(
             lambda: session.get_unread_messages(credential=cred),
@@ -2245,7 +2318,9 @@ async def bili_recent_messages(
     Returns:
         JSON：success、count 和 sessions
     """
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     try:
         sessions = await fetch_unread_sessions(
             cred,
@@ -2270,7 +2345,9 @@ async def bili_received_replies() -> str:
     Returns:
         回复通知接口的 JSON 数据
     """
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     try:
         result = await retry_network(
             lambda: session.get_replies(credential=cred),
@@ -2288,7 +2365,9 @@ async def bili_received_at_and_likes() -> str:
     Returns:
         JSON：at 和 likes 两部分；单项失败时额外带 at_error/likes_error
     """
-    cred = await get_cred()
+    cred, login_error = await get_cred_or_error()
+    if login_error:
+        return login_error
     result: dict[str, Any] = {}
     try:
         result["at"] = await retry_network(

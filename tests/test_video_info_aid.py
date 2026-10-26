@@ -27,6 +27,9 @@ class FakeVideo:
             "stat": {"view": 1},
         }
 
+    async def get_tags(self):
+        return [{"tag_name": "测试标签"}]
+
 
 class VideoInfoAidTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

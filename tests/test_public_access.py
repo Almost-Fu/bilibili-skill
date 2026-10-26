@@ -31,6 +31,30 @@ class FakeVideo:
     async def get_subtitle(self, cid=None):
         raise CredentialNoSessdataException()
 
+    async def get_tags(self):
+        return [{"tag_name": "测试标签"}]
+
+
+class FakeUser:
+    def __init__(self, uid, credential=None):
+        self.uid = uid
+
+    async def get_user_info(self):
+        return {
+            "name": "UP",
+            "sign": "",
+            "level": 6,
+            "face": "",
+            "is_senior_member": 0,
+            "top_photo": "",
+        }
+
+    async def get_up_stat(self):
+        raise RuntimeError("CredentialNoBiliJctException: 未提供 bili_jct")
+
+    async def get_relation_info(self):
+        return {"follower": 10, "following": 5}
+
 
 class NoCredential:
     """模拟未登录：CredentialManager.get() 返回 None。"""
@@ -67,6 +91,7 @@ class PublicAccessTests(unittest.IsolatedAsyncioTestCase):
                 await mcp_server.bili_video_info("BV1xx411c7mD")
             )
         self.assertEqual(data["title"], "测试视频")
+        self.assertEqual(data["tags"], ["测试标签"])
 
     async def test_未登录读字幕返回结构化登录提示(self):
         with NoCredential(), patch.object(
@@ -95,13 +120,70 @@ class PublicAccessTests(unittest.IsolatedAsyncioTestCase):
         ):
             data = json.loads(await mcp_server.bili_favorite_lists(uid=123))
         self.assertTrue(data["login_required"])
-        self.assertIn("登录", data["message"])
+        self.assertIn("登录", data["error"])
 
-    async def test_查自己的收藏夹仍然需要登录(self):
+    async def test_查自己的收藏夹未登录时返回结构化提示(self):
         with NoCredential():
-            with self.assertRaises(Exception) as ctx:
-                await mcp_server.bili_favorite_lists(uid=0)
-        self.assertIn("bili_login", str(ctx.exception))
+            data = json.loads(await mcp_server.bili_favorite_lists(uid=0))
+        self.assertFalse(data["success"])
+        self.assertTrue(data["login_required"])
+        self.assertIn("bili_login", data["error"])
+
+    async def test_未登录用户累计数据返回空而不是零(self):
+        with NoCredential(), patch.object(
+            mcp_server.user, "User", FakeUser
+        ):
+            data = json.loads(await mcp_server.bili_user_info(2))
+        self.assertIsNone(data["likes"])
+        self.assertIsNone(data["archive_view"])
+        self.assertIsNone(data["article_view"])
+        self.assertTrue(data["stats_unavailable"])
+        self.assertIn("bili_jct", data["stats_error"])
+        self.assertEqual(data["fans"], 10)
+
+    async def test_未登录写工具返回结构化登录提示(self):
+        with NoCredential():
+            dynamic_data = json.loads(
+                await mcp_server.bili_send_dynamic("test")
+            )
+            opus_data = json.loads(
+                await mcp_server.bili_send_opus("标题", "正文")
+            )
+            favorite_data = json.loads(
+                await mcp_server.bili_favorite("BV1xx411c7mD")
+            )
+            reply_data = json.loads(
+                await mcp_server.bili_reply("BV1xx411c7mD", "test")
+            )
+            message_data = json.loads(
+                await mcp_server.bili_send_message(1, "test")
+            )
+            unread_data = json.loads(
+                await mcp_server.bili_unread_messages()
+            )
+            recent_data = json.loads(
+                await mcp_server.bili_recent_messages()
+            )
+            replies_data = json.loads(
+                await mcp_server.bili_received_replies()
+            )
+            at_data = json.loads(
+                await mcp_server.bili_received_at_and_likes()
+            )
+        for data in (
+            dynamic_data,
+            opus_data,
+            favorite_data,
+            reply_data,
+            message_data,
+            unread_data,
+            recent_data,
+            replies_data,
+            at_data,
+        ):
+            self.assertFalse(data["success"])
+            self.assertTrue(data["login_required"])
+            self.assertIn("bili_login", data["error"])
 
 
 if __name__ == "__main__":
