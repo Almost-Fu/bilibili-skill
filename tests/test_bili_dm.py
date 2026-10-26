@@ -186,6 +186,12 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(sessions[0]["uid"], 123)
         self.assertEqual(len(sessions[0]["messages"]), 2)
         fetch_msgs.assert_awaited_once()
+        # bilibili-api 17 的签名是 (talker_id, credential, session_type=1)；
+        # 参数传反时这里会直接失败，而不是运行时才暴露。
+        args, kwargs = fetch_msgs.await_args
+        self.assertEqual(args[0], 123)
+        self.assertIsInstance(args[1], DummyCredential)
+        self.assertEqual(kwargs.get("session_type"), 1)
 
 
 class SystemNoticeTests(unittest.TestCase):

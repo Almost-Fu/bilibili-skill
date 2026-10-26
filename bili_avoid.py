@@ -25,12 +25,14 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import bili_time
+from bili_utils import replace_file
 
 DATA_DIR = Path(__file__).parent / "data"
 # 宿主和 MCP Server 分属不同进程或目录、需要共用同一份名单时，
@@ -83,12 +85,21 @@ class AvoidList:
 
     def _save(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        fd, temp_name = tempfile.mkstemp(
+            prefix=self.path.name + ".", suffix=".tmp", dir=str(self.path.parent)
         )
-        os.replace(tmp, self.path)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            replace_file(temp_name, self.path)
+        finally:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
 
     # -- 记账 ----------------------------------------------------------
 

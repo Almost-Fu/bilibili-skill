@@ -6,7 +6,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bili_utils import read_json, to_int, to_nonzero_int, write_json_atomic
+from bili_utils import (
+    file_lock,
+    read_json,
+    to_int,
+    to_nonzero_int,
+    write_json_atomic,
+)
 
 
 class ToIntTests(unittest.TestCase):
@@ -54,6 +60,19 @@ class JsonFileTests(unittest.TestCase):
         target = Path(self._tmp.name) / "nested" / "state.json"
         write_json_atomic(target, [1])
         self.assertEqual(read_json(target), [1])
+
+    def test_不留下临时文件(self):
+        write_json_atomic(self.path, {"v": 1})
+        leftovers = [
+            item.name
+            for item in self.path.parent.iterdir()
+            if item.name != self.path.name
+        ]
+        self.assertEqual(leftovers, [])
+
+    def test_文件锁可获取(self):
+        with file_lock(self.path) as locked:
+            self.assertTrue(locked)
 
 
 if __name__ == "__main__":

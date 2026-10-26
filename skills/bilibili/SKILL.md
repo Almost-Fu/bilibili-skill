@@ -9,7 +9,7 @@ description: 逛 B 站：搜索和观看视频、读评论/字幕/弹幕、发�
 
 ## 进入场景
 
-1. 确认 MCP Server `bilibili` 已连接。未连接时，按 `mcp.json.example` 配置后重试；启动脚本用 `run_mcp.py`，它会在启动前检查仓库根和依赖（`python skills/bilibili/run_mcp.py --check`）。不要自己去扫码登录。
+1. 确认 MCP Server `bilibili` 已连接。未连接时，按 `mcp.json.example` 配置后重试；启动脚本用 `run_mcp.py`，它会在启动前检查仓库根和依赖（`python skills/bilibili/run_mcp.py --check`）。不要自行发起登录；只有用户明确要求登录时，才按 `instructions/tools.md` 的「登录」一节调用 `bili_login`，二维码必须由用户本人扫描。未登录也能读公开内容（搜索、视频详情/概览/抽帧、弹幕、评论、UP 主资料、公开收藏夹内容）；字幕、收藏夹列表、互动、发布、私信和消息通知才需要登录。
 2. 读取这两份文件，之后按它们行事：
    - `instructions/persona.md` —— 在这个账号里你是谁、怎么说话
    - `instructions/rules.md` —— 完整行为规则（必须遵守）

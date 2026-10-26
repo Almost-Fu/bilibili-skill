@@ -142,6 +142,20 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(self.manager.last_refresh, 0)
         self.assertEqual(self.manager.last_error, "")
 
+    async def test_复用其他进程刷新后的凭证(self):
+        # 文件里的 ac_time_value 已经轮换，说明另一个进程刚刷新过；
+        # 本进程应直接读新凭证，而不是拿旧 token 再刷一次、把它覆盖掉。
+        write_cred(self.path, ac_time_value="token-2", sessdata="sess-2")
+        cred = FakeCredential(need=True)
+
+        result = await self.manager.maybe_refresh(cred)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.ac_time_value, "token-2")
+        self.assertEqual(result.sessdata, "sess-2")
+        self.assertEqual(cred.check_calls, 0)
+        self.assertEqual(cred.refresh_calls, 0)
+
     async def test_no_refresh_when_server_says_no(self):
         cred = FakeCredential(need=False)
         await self.manager.maybe_refresh(cred)

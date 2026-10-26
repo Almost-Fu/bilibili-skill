@@ -49,6 +49,42 @@ class RetryNetworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual(sleep.delays, [0.8, 1.6])
 
+    async def test_retries_httpx_connect_error(self):
+        # bilibili-api 的 httpx 客户端抛的是 httpx.ConnectError，不是 OSError。
+        import httpx
+
+        calls = []
+        sleep = _SleepRecorder()
+
+        async def operation():
+            calls.append(1)
+            if len(calls) == 1:
+                raise httpx.ConnectError("connection failed")
+            return "ok"
+
+        with patch("bili_utils.asyncio.sleep", sleep):
+            result = await bili_utils.retry_network(operation)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(sleep.delays), 1)
+
+    async def test_retries_timeout(self):
+        calls = []
+        sleep = _SleepRecorder()
+
+        async def operation():
+            calls.append(1)
+            if len(calls) == 1:
+                raise asyncio.TimeoutError()
+            return "ok"
+
+        with patch("bili_utils.asyncio.sleep", sleep):
+            result = await bili_utils.retry_network(operation)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(calls), 2)
+
     async def test_gives_up_after_attempts(self):
         calls = []
         sleep = _SleepRecorder()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import mcp_server
 
@@ -28,15 +28,13 @@ class FakeVideo:
         }
 
 
-async def fake_cred():
-    return None
-
-
 class VideoInfoAidTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         FakeVideo.calls = []
         self.patches = (
-            patch.object(mcp_server, "get_cred", fake_cred),
+            patch.object(
+                mcp_server, "get_cred_optional", AsyncMock(return_value=None)
+            ),
             patch.object(mcp_server.video, "Video", FakeVideo),
         )
         for item in self.patches:

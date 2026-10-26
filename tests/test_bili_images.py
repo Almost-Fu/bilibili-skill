@@ -12,6 +12,7 @@ from unittest.mock import patch
 from PIL import Image
 
 import bili_images
+import bili_uploads
 import mcp_server
 
 
@@ -115,7 +116,7 @@ class ResolverTests(unittest.TestCase):
 
 
 class ToolGuardTests(unittest.TestCase):
-    """发动态、专栏、视频封面都必须走同一套白名单。"""
+    """发动态、图文（Opus）、视频封面都必须走同一套白名单。"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -136,6 +137,13 @@ class ToolGuardTests(unittest.TestCase):
         self.outside = png(self.other / "a.png")
         self.video = self.root / "v.mp4"
         self.video.write_bytes(b"not a real video")
+        # 这些用例只验证封面/图片白名单；临时目录里的视频必然不在
+        # data/uploads 下，先放行视频路径，别让视频来源检查抢在封面之前报错。
+        upload_patcher = patch.object(
+            bili_uploads, "resolve_upload_video", lambda value: Path(value)
+        )
+        upload_patcher.start()
+        self.addCleanup(upload_patcher.stop)
 
     def test_动态拒绝网络图片(self):
         result = json.loads(asyncio.run(
@@ -151,7 +159,7 @@ class ToolGuardTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("来源不允许", result["error"])
 
-    def test_专栏拒绝网络图片(self):
+    def test_图文动态拒绝网络图片(self):
         result = json.loads(asyncio.run(
             mcp_server.bili_send_opus("标题", "正文", images=["https://x/a.jpg"])
         ))

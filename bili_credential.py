@@ -25,6 +25,7 @@ from typing import Any, Callable
 from bilibili_api import Credential
 
 from bili_auth import save_credential
+from bili_utils import file_lock
 
 CRED_FILE = Path(__file__).resolve().parent / "bili_credential.json"
 
@@ -136,30 +137,48 @@ class CredentialManager:
             now = self._clock()
             if not self._should_check(now, force):
                 return credential
-            self.last_check = now
-            try:
-                need = await credential.check_refresh()
-            except Exception as exc:
-                self.last_error = f"check_refresh: {type(exc).__name__}: {exc}"
-                self.logger.info("检查 cookie 刷新失败：%s", exc)
-                return credential
-            if not need:
-                return credential
+            # 跨进程文件锁：两个宿主同时触发刷新时，refresh_token 会被
+            # 轮换，后写的进程如果拿着旧值会覆盖掉新凭证。锁只覆盖
+            # “检查 + 刷新 + 落盘”这一段；拿不到锁也继续执行。
+            with file_lock(self.path) as locked:
+                if locked:
+                    current = load_credential(self.path)
+                    if (
+                        current is not None
+                        and current.ac_time_value
+                        and current.ac_time_value != credential.ac_time_value
+                    ):
+                        # 另一个进程已经刷新过，直接用文件里的新凭证。
+                        self.last_check = now
+                        self.last_refresh = self._clock()
+                        self.last_error = ""
+                        self.logger.info("检测到其他进程已刷新凭证，直接复用")
+                        return current
 
-            try:
-                await credential.refresh()
-            except Exception as exc:
-                self.last_error = f"refresh: {type(exc).__name__}: {exc}"
-                self.logger.warning("刷新 cookie 失败：%s", exc)
-                return credential
+                self.last_check = now
+                try:
+                    need = await credential.check_refresh()
+                except Exception as exc:
+                    self.last_error = f"check_refresh: {type(exc).__name__}: {exc}"
+                    self.logger.info("检查 cookie 刷新失败：%s", exc)
+                    return credential
+                if not need:
+                    return credential
 
-            try:
-                persist_credential(credential, self.path)
-            except OSError as exc:
-                self.last_error = f"persist: {type(exc).__name__}: {exc}"
-                self.logger.warning("凭证已刷新但写回失败：%s", exc)
-            else:
-                self.last_error = ""
-                self.logger.info("凭证已刷新并写回 %s", self.path)
-            self.last_refresh = self._clock()
-            return credential
+                try:
+                    await credential.refresh()
+                except Exception as exc:
+                    self.last_error = f"refresh: {type(exc).__name__}: {exc}"
+                    self.logger.warning("刷新 cookie 失败：%s", exc)
+                    return credential
+
+                try:
+                    persist_credential(credential, self.path)
+                except OSError as exc:
+                    self.last_error = f"persist: {type(exc).__name__}: {exc}"
+                    self.logger.warning("凭证已刷新但写回失败：%s", exc)
+                else:
+                    self.last_error = ""
+                    self.logger.info("凭证已刷新并写回 %s", self.path)
+                self.last_refresh = self._clock()
+                return credential

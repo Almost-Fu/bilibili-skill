@@ -62,6 +62,23 @@ class SkillManifestTests(unittest.TestCase):
         self.assertGreater(int(patrol["interval_minutes"]), 0)
         for tool in patrol["check_tools"]:
             self.assertIn(tool, tool_manifest.ALL_TOOL_NAMES)
+        self.assertLessEqual(
+            {
+                "bili_received_replies",
+                "bili_received_at_and_likes",
+                "bili_recent_messages",
+            },
+            set(patrol["check_tools"]),
+            "巡检必须覆盖 patrol.md 要求的回复、@/点赞和私信会话三处",
+        )
+
+    def test_额度与白名单字段可执行(self):
+        limits = self.data["limits"]
+        self.assertEqual(limits["enforced_by"], "host")
+        for key in ("reply_per_day", "message_per_day", "dynamic_per_day"):
+            self.assertGreater(int(limits[key]), 0, key)
+        self.assertTrue(limits["whitelist_exempt"])
+        self.assertIsInstance(limits["whitelist_uids"], list)
 
     def test_组件版本字段合法(self):
         self.assertRegex(self.data.get("version", ""), r"^\d+\.\d+\.\d+$")

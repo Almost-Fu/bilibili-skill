@@ -28,6 +28,7 @@ WRITE_TOOL_NAMES = frozenset(
 READ_ONLY_TOOL_NAMES = frozenset(
     {
         "bili_check_credential",
+        "bili_login_check",
         "bili_search",
         "bili_comments",
         "bili_subtitle",
@@ -58,11 +59,12 @@ READ_ONLY_TOOL_NAMES = frozenset(
 )
 
 # 必须由人类发起的工具：扫码登录会生成二维码并建立登录会话；
-# 视频投稿发布前需要人类确认，因此也不由 Agent 自主调用
+# 视频投稿发布前需要人类确认，因此也不由 Agent 自主调用。
+# `bili_login_check` 只是轮询扫码结果，不建立会话，属于只读工具——
+# 否则宿主拦下它，用户扫码后登录流程会卡住。
 HUMAN_ONLY_TOOL_NAMES = frozenset(
     {
         "bili_login",
-        "bili_login_check",
         "bili_upload_video",
         "bili_upload_video_multi",
     }

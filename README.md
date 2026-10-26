@@ -7,16 +7,23 @@ B 站 MCP Server + 按需加载的技能包，共 37 个工具。支持 Claude C
 需要 Python 3.10+；视频上传自动截封面需要 ffmpeg。
 
 ```bash
+python -m venv .venv
+# Windows：.venv\Scripts\activate
+# macOS/Linux：source .venv/bin/activate
 pip install -r requirements.txt
 python skills/bilibili/run_mcp.py --check   # 检查仓库根和依赖
 ```
 
+下面的 MCP 配置示例默认使用 `.venv` 里的解释器；不激活虚拟环境时，把命令换成 `.venv/Scripts/python.exe`（Windows）或 `.venv/bin/python`（macOS/Linux）。
+
 登录二选一：
 
-- 接入 MCP 后对 AI 说“登录B站”，调用 `bili_login` 扫码；
+- 接入 MCP 后对 AI 说“登录B站”，由 AI 调用 `bili_login` 生成二维码，你用 B 站 App 扫码，再让它调用 `bili_login_check` 确认；
 - 或运行 `python bili_login.py`。
 
 凭证保存在本地 `bili_credential.json`，会自动续期；不要提交或分享。
+
+不登录也能读公开内容：搜索、视频详情/概览/抽帧、弹幕、评论、UP 主资料和公开收藏夹内容。字幕、收藏夹列表、发评论/私信/动态、投稿、自己的收藏夹和消息通知需要登录。
 
 可调参数优先级：环境变量 > `config.json` > 默认值。示例：
 
@@ -52,7 +59,8 @@ MCP Server 本身不强制每日写入额度、白名单或投稿审批。宿主
 
 ```bash
 npm i -g mcporter
-npx mcporter config add bilibili "python /path/to/bilibili-skill/skills/bilibili/run_mcp.py"
+# Windows 把解释器换成 .venv/Scripts/python.exe
+npx mcporter config add bilibili "/path/to/bilibili-skill/.venv/bin/python /path/to/bilibili-skill/skills/bilibili/run_mcp.py"
 ```
 
 **Claude Code**：在项目根目录创建 `.mcp.json`：
@@ -73,11 +81,11 @@ npx mcporter config add bilibili "python /path/to/bilibili-skill/skills/bilibili
 }
 ```
 
-Windows 的 Python 是 `.venv/Scripts/python.exe`。首次使用会显示 `Pending approval`，批准一次即可；无头模式把 `{"enabledMcpjsonServers":["bilibili"]}` 写进 `.claude/settings.local.json`。
+示例里的 `/path/to/bilibili-skill` 要换成仓库绝对路径；Windows 的 Python 是 `.venv/Scripts/python.exe`。首次使用会显示 `Pending approval`，批准一次即可；无头模式把 `{"enabledMcpjsonServers":["bilibili"]}` 写进 `.claude/settings.local.json`。
 
 Claude Code 不执行 `skill.json` 的懒启动、巡检和写入名单，写入限制只能靠 `SKILL.md` 和它自己的权限设置。
 
-**Cursor / Cline**：添加 MCP Server，名称 `bilibili`，command 填项目虚拟环境的 Python，args 填 `skills/bilibili/run_mcp.py`，`BILI_SKILL_ROOT` 填仓库根。也可以直接用 [mcp.json.example](skills/bilibili/mcp.json.example)。
+**Cursor / Cline**：添加 MCP Server，名称 `bilibili`，command 填项目虚拟环境的 Python，args 填 `skills/bilibili/run_mcp.py`，`BILI_SKILL_ROOT` 填仓库根。也可以复制 [mcp.json.example](skills/bilibili/mcp.json.example)，把其中所有 `<项目路径>` 替换成仓库绝对路径，并按系统改解释器（Windows 是 `.venv/Scripts/python.exe`，macOS/Linux 是 `.venv/bin/python`）。
 
 ## 工具
 

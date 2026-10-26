@@ -47,7 +47,7 @@ skills/bilibili/
 
 字段含义见 [bilibili/skill.json](bilibili/skill.json)。
 
-`skill.json` 的 `limits.enforced_by` 为 `host`：每日额度、白名单和投稿的 `human_only` 都由宿主执行，MCP Server 本身不计数。直接接 MCP 客户端而不实现宿主逻辑时，这些限制不会生效。
+`skill.json` 的 `limits` 给出宿主应执行的默认值：`reply_per_day`、`message_per_day`、`dynamic_per_day` 是每日写入额度，`whitelist_uids` 是白名单账号 UID（宿主还应把 `persona.md` 里填写的主人 UID 并入），`whitelist_exempt` 表示白名单账号不受额度限制；宿主可按自己的策略覆盖这些默认值。`limits.enforced_by` 为 `host`：每日额度、白名单和投稿的 `human_only` 都由宿主执行，MCP Server 本身不计数。直接接 MCP 客户端而不实现宿主逻辑时，这些限制不会生效。
 
 ### 本地工具契约（可选）
 

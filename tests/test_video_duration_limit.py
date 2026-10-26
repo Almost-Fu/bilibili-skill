@@ -28,7 +28,7 @@ class FakeVideo:
 
 
 async def fake_cred():
-    return None
+    return mcp_server.Credential()
 
 
 class VideoDurationLimitTests(unittest.TestCase):
@@ -74,7 +74,7 @@ class VideoDurationLimitTests(unittest.TestCase):
     def test_概览拒绝超长视频(self):
         with (
             patch.dict(os.environ, {"BILI_MAX_VIDEO_MINUTES": "180"}),
-            patch.object(mcp_server, "get_cred", fake_cred),
+            patch.object(mcp_server, "get_cred_optional", fake_cred),
             patch.object(mcp_server.video, "Video", FakeVideo),
         ):
             data = json.loads(
@@ -86,7 +86,7 @@ class VideoDurationLimitTests(unittest.TestCase):
     def test_高清补帧拒绝超长视频(self):
         with (
             patch.dict(os.environ, {"BILI_MAX_VIDEO_MINUTES": "180"}),
-            patch.object(mcp_server, "get_cred", fake_cred),
+            patch.object(mcp_server, "get_cred_optional", fake_cred),
             patch.object(mcp_server.video, "Video", FakeVideo),
         ):
             data = json.loads(

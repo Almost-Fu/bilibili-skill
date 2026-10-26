@@ -29,8 +29,8 @@
     "interval_minutes": 30,
     "instructions": "instructions/patrol.md",
     "check_tools": [
-      "bili_unread_messages",
       "bili_received_replies",
+      "bili_received_at_and_likes",
       "bili_recent_messages"
     ]
   },
@@ -45,7 +45,6 @@
     ],
     "human_only": [
       "bili_login",
-      "bili_login_check",
       "bili_upload_video",
       "bili_upload_video_multi"
     ],
@@ -53,8 +52,12 @@
   },
   "limits": {
     "enforced_by": "host",
+    "reply_per_day": 20,
+    "message_per_day": 10,
     "dynamic_per_day": 1,
-    "whitelist_exempt": true
+    "whitelist_exempt": true,
+    "whitelist_uids": [],
+    "whitelist_note": "默认包含主人；宿主应把 persona.md 中填写的主人 UID 并入白名单，也可在本数组追加其他账号 UID"
   },
   "local_tools": ["agent_avoid"]
 }

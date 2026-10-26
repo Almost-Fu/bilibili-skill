@@ -11,10 +11,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
-from collections.abc import Awaitable, Callable
+import tempfile
+import time
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -29,6 +32,22 @@ NETWORK_RETRY_ATTEMPTS = 3
 NETWORK_RETRY_BASE_DELAY = 0.8
 NETWORK_RETRY_MAX_DELAY = 4.0
 
+# bilibili-api 允许换用 httpx / aiohttp / curl_cffi，连接失败和超时会以
+# 各自的异常类型抛出，而它们都不继承 OSError。按异常基类的模块名识别，
+# 既不用强行 import 可选依赖，也不会把 B 站业务错误（NetworkException）
+# 误当成网络抖动去重试。
+_NETWORK_ERROR_MODULES = frozenset({"httpx", "aiohttp", "curl_cffi"})
+
+
+def is_retryable_network_error(exc: BaseException) -> bool:
+    """判断异常是否属于可以退避重试的本地网络故障。"""
+    if isinstance(exc, (OSError, asyncio.TimeoutError)):
+        return True
+    return any(
+        (base.__module__ or "").split(".")[0] in _NETWORK_ERROR_MODULES
+        for base in type(exc).__mro__
+    )
+
 
 async def retry_network(
     operation: Callable[[], Awaitable[_T]],
@@ -40,16 +59,19 @@ async def retry_network(
 ) -> _T:
     """执行一次网络请求，遇到网络层错误按指数退避重试。
 
-    ``OSError`` 覆盖 DNS 解析失败（``getaddrinfo failed``）、连接被拒和
-    系统级超时，这几类都是本地网络抖动，重试有实际意义；B 站返回的业务
-    错误不继承 ``OSError``，会原样抛出，交给调用方判断。
+    覆盖 ``OSError``（DNS 解析失败、连接被拒）、``asyncio.TimeoutError``
+    以及 httpx / aiohttp / curl_cffi 的连接类异常，这几类都是本地网络抖动，
+    重试有实际意义；B 站返回的业务错误（如风控、HTTP 412/429）会原样抛出，
+    交给调用方判断。
     """
     attempts = max(1, int(attempts))
     last: BaseException | None = None
     for attempt in range(1, attempts + 1):
         try:
             return await operation()
-        except OSError as exc:
+        except Exception as exc:
+            if not is_retryable_network_error(exc):
+                raise
             last = exc
             if attempt >= attempts:
                 break
@@ -81,6 +103,25 @@ def to_nonzero_int(value: Any) -> int | None:
     return number or None
 
 
+def replace_file(source: str | Path, target: str | Path) -> None:
+    """``os.replace`` 的 Windows 友好版本。
+
+    Windows 上目标文件被杀毒、索引或另一个进程短暂占用时，``os.replace``
+    会抛 ``PermissionError``；换文件本身是幂等的，短暂重试即可，不必让
+    凭证/状态写入直接失败。
+    """
+    source, target = Path(source), Path(target)
+    attempts = 5 if os.name == "nt" else 1
+    for attempt in range(attempts):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt >= attempts - 1:
+                raise
+            time.sleep(0.05 * (2**attempt))
+
+
 def read_json(path: str | Path) -> Any:
     """读 JSON；文件不存在、没有权限或内容坏掉时返回 ``None``。"""
     try:
@@ -102,7 +143,84 @@ def write_json_atomic(
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp = target.with_name(target.name + ".tmp")
     text = json.dumps(payload, ensure_ascii=False, indent=indent) + "\n"
-    temp.write_text(text, encoding="utf-8")
-    os.replace(temp, target)
+    # mkstemp 每次生成唯一文件名：两个进程同时写同一个目标时不会互相
+    # 截断固定名字的 .tmp 文件。
+    fd, temp_name = tempfile.mkstemp(
+        prefix=target.name + ".", suffix=".tmp", dir=str(target.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        replace_file(temp_name, target)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+@contextlib.contextmanager
+def file_lock(
+    path: str | Path, *, timeout: float = 10.0
+) -> Iterator[bool]:
+    """跨进程排他锁，返回是否真的拿到了锁。
+
+    锁文件是 ``<path>.lock``。拿不到锁（超时、平台不支持）时 yield
+    ``False`` 并继续执行，而不是抛异常——锁只是防止并发刷新凭证时互相
+    覆盖，不能反过来把主流程卡死。
+    """
+    lock_path = Path(str(path) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+b")
+    acquired = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            deadline = time.monotonic() + max(0.0, timeout)
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    acquired = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.1)
+        else:
+            import fcntl
+
+            deadline = time.monotonic() + max(0.0, timeout)
+            while True:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.1)
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        handle.close()

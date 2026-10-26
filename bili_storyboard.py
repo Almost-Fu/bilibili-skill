@@ -525,6 +525,13 @@ async def fetch_subtitle(
     try:
         payload = await video_obj.get_subtitle(cid=cid)
     except Exception as exc:  # 字幕接口偶发失败，不应拖垮整个概览
+        if type(exc).__name__ == "CredentialNoSessdataException":
+            # 未登录时字幕接口必然失败，这不是“视频没字幕”。
+            return {
+                "available": False,
+                "login_required": True,
+                "message": "读取字幕需要先登录 B 站",
+            }
         return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
 
     subtitles = payload.get("subtitles") if isinstance(payload, dict) else None

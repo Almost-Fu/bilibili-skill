@@ -29,7 +29,19 @@ import bili_uploads
 import qrcode
 from mcp.server.fastmcp import FastMCP
 
-from bilibili_api import comment, dynamic, favorite_list, hot, rank, search, session, user, video
+from bilibili_api import (
+    Credential,
+    comment,
+    dynamic,
+    favorite_list,
+    hot,
+    rank,
+    search,
+    session,
+    user,
+    video,
+)
+from bilibili_api.exceptions import CredentialNoSessdataException
 from bilibili_api.utils.picture import Picture
 from bilibili_api.video_uploader import VideoMeta, VideoUploader, VideoUploaderPage
 
@@ -65,6 +77,17 @@ async def get_cred():
             "未登录B站！请先调用 bili_login 工具获取登录二维码，让用户扫码登录。"
         )
     return cred
+
+
+async def get_cred_optional():
+    """取一份供公开接口使用的凭证；未登录时返回空凭证而不是报错。
+
+    B 站的视频、评论、弹幕、用户资料和公开收藏夹内容都不要求登录，这些
+    只读工具不应该因为还没扫码就完全不可用。字幕接口是例外，它强制要求
+    sessdata，由 ``bili_subtitle`` 单独给出登录提示。
+    """
+    cred = await _credentials.get()
+    return cred or Credential()
 
 
 # ========== 小工具 ==========
@@ -104,12 +127,16 @@ def _outbound_image(
     return path, None
 
 
-async def _open_video(bvid: str = "", aid: int = 0):
-    """取凭证并打开视频，返回 (credential, Video, info)。
+async def _open_video(
+    bvid: str = "", aid: int = 0, *, require_login: bool = True
+):
+    """打开视频并返回 (credential, Video, info)。
 
     ``bvid`` 和 ``aid`` 二选一；知道 av 号但不知道 BV 号时传 ``aid``。
+    ``require_login=False`` 供只读工具使用：未登录时用空凭证访问公开接口，
+    而不是直接报未登录。
     """
-    cred = await get_cred()
+    cred = await get_cred() if require_login else await get_cred_optional()
     if bvid:
         client = video.Video(bvid=bvid, credential=cred)
     else:
@@ -501,7 +528,7 @@ async def bili_comments(bvid: str, num: int = 30) -> str:
     Returns:
         JSON：bvid、count 和 comments
     """
-    cred, _client, info = await _open_video(bvid)
+    cred, _client, info = await _open_video(bvid, require_login=False)
     oid = info["aid"]
 
     collected: list[dict[str, Any]] = []
@@ -522,8 +549,21 @@ async def bili_comments(bvid: str, num: int = 30) -> str:
                 collected.append(_comment_card(row))
             page += 1
             await asyncio.sleep(0.5)
-        except Exception:
-            break
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            if not collected:
+                # 第一页就失败时不能返回 count=0：凭证失效、-412 风控和
+                # 网络故障都会走到这里，静默返回空评论会被误读成“没人评论”。
+                return _json({"bvid": bvid, "error": f"获取评论失败：{detail}"})
+            return _json(
+                {
+                    "bvid": bvid,
+                    "count": len(collected[:num]),
+                    "comments": collected[:num],
+                    "partial": True,
+                    "error": f"评论只取到第 {page - 1} 页：{detail}",
+                }
+            )
 
     selected = collected[:num]
     return _json({"bvid": bvid, "count": len(selected), "comments": selected})
@@ -533,20 +573,34 @@ async def bili_comments(bvid: str, num: int = 30) -> str:
 async def bili_subtitle(bvid: str) -> str:
     """获取视频字幕（优先中文 AI 字幕）。
 
+    字幕接口需要登录；未登录时返回 ``login_required: true``，不会抛错。
+
     Args:
         bvid: 视频 BV 号
 
     Returns:
         JSON：title、language、segments 和拼接后的 text
     """
-    _cred, client, info = await _open_video(bvid)
+    _cred, client, info = await _open_video(bvid, require_login=False)
     cid = info.get("cid", 0)
     if not cid and info.get("pages"):
         cid = (info["pages"][0] or {}).get("cid", 0)
     if not cid:
         return _json({"error": "无法获取cid"})
 
-    listing = await client.get_subtitle(cid=cid)
+    try:
+        listing = await client.get_subtitle(cid=cid)
+    except CredentialNoSessdataException:
+        # 字幕是唯一强制要求 sessdata 的公开视频接口；未登录时返回结构化
+        # 提示而不是让整个工具报错，方便 Agent 向用户解释。
+        return _json(
+            {
+                "bvid": bvid,
+                "title": info.get("title", ""),
+                "login_required": True,
+                "message": "读取字幕需要先登录 B 站。请用户明确要求后，再调用 bili_login 扫码。",
+            }
+        )
     subtitles = listing.get("subtitles", [])
     if not subtitles:
         return _json({"message": "该视频没有字幕"})
@@ -588,7 +642,7 @@ async def bili_danmaku(bvid: str, num: int = 100) -> str:
     Returns:
         JSON：bvid、count 和 danmakus
     """
-    _cred, client, _info = await _open_video(bvid)
+    _cred, client, _info = await _open_video(bvid, require_login=False)
     items = await client.get_danmakus(page_index=0)
     picked = [
         {"text": item.text, "time": item.dm_time}
@@ -610,7 +664,9 @@ async def bili_video_info(bvid: str = "", aid: int = 0) -> str:
     """
     if not bvid and not aid:
         return _json({"error": "请提供 bvid 或 aid"})
-    _cred, _client, info = await _open_video(bvid, aid=aid)
+    _cred, _client, info = await _open_video(
+        bvid, aid=aid, require_login=False
+    )
     stat = info.get("stat") or {}
     return _json(
         {
@@ -701,7 +757,7 @@ async def bili_video_overview(
     Returns:
         JSON：视频信息、字幕、联系表、时间戳、窗口信息和 cleanup_id
     """
-    _cred, client, info = await _open_video(bvid)
+    _cred, client, info = await _open_video(bvid, require_login=False)
     context, error = _pick_page(info, page)
     if error:
         return error
@@ -822,7 +878,7 @@ async def bili_video_frames(
     Returns:
         JSON：每帧时间、本地路径、宽高和 cleanup_id
     """
-    _cred, client, info = await _open_video(bvid)
+    _cred, client, info = await _open_video(bvid, require_login=False)
     context, error = _pick_page(info, page)
     if error:
         return error
@@ -971,8 +1027,6 @@ async def bili_crawl(
     Returns:
         JSON：keyword、视频数、评论总数和每个视频的采集结果
     """
-    await get_cred()
-
     found = await search.search_by_type(
         keyword=keyword,
         search_type=search.SearchObjectType.VIDEO,
@@ -1004,20 +1058,29 @@ async def bili_crawl(
         )
 
         subtitle_text = ""
+        subtitle_error = ""
         if get_subtitles:
             try:
                 subtitle_payload = json.loads(await bili_subtitle(bvid=bvid))
                 subtitle_text = subtitle_payload.get("text", "")
-            except Exception:
+                if subtitle_payload.get("login_required"):
+                    subtitle_error = subtitle_payload.get(
+                        "message", "未登录，无法抓取字幕"
+                    )
+            except Exception as exc:
                 subtitle_text = ""
+                subtitle_error = f"{type(exc).__name__}: {exc}"
 
-        collected.append(
-            {
-                "video": brief,
-                "comments": comment_payload.get("comments", []),
-                "subtitle_text": subtitle_text,
-            }
-        )
+        entry = {
+            "video": brief,
+            "comments": comment_payload.get("comments", []),
+            "subtitle_text": subtitle_text,
+        }
+        if comment_payload.get("error"):
+            entry["comments_error"] = comment_payload["error"]
+        if subtitle_error:
+            entry["subtitle_error"] = subtitle_error
+        collected.append(entry)
         await asyncio.sleep(1)
 
     return _json(
@@ -1365,6 +1428,8 @@ async def bili_upload_video_multi(
                 "error": "video_paths 和 page_titles 数量必须一致",
             }
         )
+    if not title or not title.strip():
+        return _json({"success": False, "error": "title 不能为空"})
 
     cover: Path | None = None
     if cover_path and cover_path.strip():
@@ -1397,6 +1462,8 @@ async def bili_upload_video_multi(
             tags=_tag_list(tags),
             original=original,
             source=source.strip() if source and source.strip() else None,
+            # 与单 P 投稿保持一致：原创默认禁止转载，转载必须允许转载。
+            no_reprint=original,
         )
         uploader = VideoUploader(pages=pages, meta=meta, credential=cred)
         result = await uploader.start()
@@ -1415,31 +1482,43 @@ async def bili_upload_video_multi(
 @mcp.tool()
 async def bili_send_opus(
     title: str, content: str,
-    images: list[str] | None = None, category_id: int = 0,
+    images: list[str] | None = None,
 ) -> str:
-    """发布图文专栏（Opus）。
+    """发布带标题的图文动态（Opus）。
+
+    注意：bilibili-api 17 没有专栏发布接口，本工具实际发布的是图文动态，
+    标题会作为正文首行；不要把它当专栏文章使用。
 
     Args:
-        title: 标题
+        title: 标题，会放在正文首行
         content: 正文，用换行分段
-        images: 文中图片，只接受本地表情包或绘画产物
-        category_id: 分类 ID，0 表示不指定
+        images: 文中图片，最多 9 张；只接受本地表情包或绘画产物
 
     Returns:
         JSON：success、message 和接口返回的 data
     """
+    if not title or not title.strip():
+        return _json({"success": False, "error": "title 不能为空"})
+    if not content or not content.strip():
+        return _json({"success": False, "error": "content 不能为空"})
+
     resolved: list[Path] = []
     try:
-        for value in images or []:
+        for value in (images or [])[:9]:
             resolved.append(bili_images.resolve_outbound_image(value))
     except bili_images.ImageSourceError as exc:
         return _json({"success": False, "error": str(exc)})
 
     cred = await get_cred()
     item = dynamic.BuildDynamic.empty()
-    item.add_plain_text(f"【{title}】\n\n{content}")
+    item.add_plain_text(f"【{title.strip()}】\n\n{content.strip()}")
     for path in resolved:
-        item.add_image(Picture.from_file(str(path)))
+        try:
+            item.add_image(Picture.from_file(str(path)))
+        except Exception as exc:
+            return _json(
+                {"success": False, "error": f"图片处理失败: {path} - {exc}"}
+            )
 
     try:
         result = await dynamic.send_dynamic(info=item, credential=cred)
@@ -1449,7 +1528,7 @@ async def bili_send_opus(
     return _json(
         {
             "success": True,
-            "message": "图文发布成功",
+            "message": "图文动态发布成功",
             "data": result if isinstance(result, dict) else str(result),
         }
     )
@@ -1645,7 +1724,7 @@ async def bili_user_info(uid: int) -> str:
     Returns:
         JSON：昵称、签名、等级、头像、粉丝/关注数和播放量
     """
-    cred = await get_cred()
+    cred = await get_cred_optional()
     account = user.User(uid=uid, credential=cred)
     info = await account.get_user_info()
 
@@ -1701,7 +1780,7 @@ async def bili_user_videos(
     Returns:
         JSON：uid、page、total、count 和 videos
     """
-    cred = await get_cred()
+    cred = await get_cred_optional()
     account = user.User(uid=uid, credential=cred)
     order_map = {
         "pubdate": user.VideoOrder.PUBDATE,
@@ -1751,7 +1830,7 @@ async def bili_space_dynamics(uid: int, limit: int = 5) -> str:
     Returns:
         JSON：success、uid、count 和 dynamics
     """
-    cred = await get_cred()
+    cred = await get_cred_optional()
     try:
         items = await fetch_dynamics(
             cred, uid, limit=max(1, min(20, int(limit)))
@@ -1781,8 +1860,10 @@ async def bili_favorite_lists(uid: int = 0) -> str:
     Returns:
         JSON：uid、count 和 lists
     """
-    cred = await get_cred()
     owner = int(uid or 0)
+    # uid=0 表示“当前账号”，必须先知道登录的是谁，所以要求凭证；指定
+    # uid 时用可选凭证，让未登录调用返回结构化 login_required 而不是抛异常。
+    cred = await get_cred() if owner == 0 else await get_cred_optional()
     if owner == 0:
         data = json.loads(CRED_FILE.read_text(encoding="utf-8"))
         owner = int(data.get("dedeuserid") or 0)
@@ -1790,6 +1871,16 @@ async def bili_favorite_lists(uid: int = 0) -> str:
     response = await favorite_list.get_video_favorite_list(
         uid=owner, credential=cred
     )
+    if response is None:
+        # 未登录时 B 站对 list-all 返回 code=0 但 data=null：不报错，
+        # 也拿不到任何收藏夹。明确告诉 Agent 这是登录问题，不是“没有”。
+        return _json(
+            {
+                "uid": owner,
+                "login_required": True,
+                "message": "未登录时 B 站不返回收藏夹列表，请登录后重试。",
+            }
+        )
     lists = [
         {
             "id": row.get("id", 0),
@@ -1816,13 +1907,20 @@ async def bili_favorite_content(
     Returns:
         JSON：media_id、page、has_more、count 和 medias
     """
-    cred = await get_cred()
+    cred = await get_cred_optional()
     response = await favorite_list.get_video_favorite_list_content(
         media_id=media_id,
         page=page,
         keyword=keyword if keyword else None,
         credential=cred,
     )
+    if response is None:
+        return _json(
+            {
+                "media_id": media_id,
+                "error": "收藏夹不存在、不可见，或需要登录后查看",
+            }
+        )
     medias = [
         {
             "bvid": row.get("bvid", ""),

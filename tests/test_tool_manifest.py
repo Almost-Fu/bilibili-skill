@@ -63,6 +63,13 @@ class ManifestTests(unittest.TestCase):
         for name in ("bili_upload_video", "bili_upload_video_multi"):
             self.assertIn(name, manifest.HUMAN_ONLY_TOOL_NAMES)
 
+    def test_登录轮询不挡在人类专用里(self):
+        # 扫码本身必须由人类发起，但轮询状态只是只读；
+        # 若把它标成 human_only，用户扫码后 Agent 无法继续完成登录。
+        self.assertIn("bili_login", manifest.HUMAN_ONLY_TOOL_NAMES)
+        self.assertIn("bili_login_check", manifest.READ_ONLY_TOOL_NAMES)
+        self.assertNotIn("bili_login_check", manifest.HUMAN_ONLY_TOOL_NAMES)
+
 
 class SkillManifestTests(unittest.TestCase):
     """技能清单里的写权限必须和本文件的名单一致。

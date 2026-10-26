@@ -321,6 +321,22 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(result["segments"], 2)
         self.assertFalse(result["truncated"])
 
+    def test_未登录字幕返回登录提示(self):
+        class CredentialNoSessdataException(Exception):
+            pass
+
+        class FakeVideo:
+            async def get_subtitle(self, cid):
+                raise CredentialNoSessdataException("没有 sessdata")
+
+        result = asyncio.run(
+            storyboard.fetch_subtitle(FakeVideo(), 123, max_chars=100)
+        )
+        self.assertFalse(result["available"])
+        self.assertTrue(result["login_required"])
+        self.assertIn("登录", result["message"])
+        self.assertNotIn("error", result)
+
 
 if __name__ == "__main__":
     unittest.main()

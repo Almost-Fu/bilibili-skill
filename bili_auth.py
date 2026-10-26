@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
@@ -24,6 +25,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+
+from bili_utils import replace_file
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 CRED_FILE = PROJECT_ROOT / "bili_credential.json"
@@ -209,12 +212,22 @@ def save_credential(credential: dict[str, Any], path: str | Path = CRED_FILE) ->
     """原子写入：先写临时文件再替换，避免中途被杀留下半个凭证。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(
-        json.dumps(credential, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    text = json.dumps(credential, ensure_ascii=False, indent=2) + "\n"
+    # 唯一临时文件名：两个进程同时刷新/登录时不会互相截断同一个 .tmp。
+    fd, temp_name = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
     )
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        replace_file(temp_name, path)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
     if os.name != "nt":
         try:
             os.chmod(path, 0o600)
