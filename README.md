@@ -135,10 +135,10 @@ python -m bili_auth
 | 视频概览、抽帧 | `bili_video_overview`、`bili_video_frames` | 可用；概览里的字幕段会标记 `login_required` |
 | 热门、热搜、每周必看、排行 | `bili_hot_videos`、`bili_hot_buzzwords`、`bili_weekly_hot`、`bili_rank` | 可用 |
 | 用户资料/投稿/动态 | `bili_user_info`、`bili_user_videos`、`bili_space_dynamics` | 基础读取通常可用；`bili_user_info` 的累计数据不可用，`bili_space_dynamics` 被接口拒绝时返回 `success: false` |
-| 公开收藏夹 | `bili_favorite_content`，以及 `bili_favorite_lists` 查其他 UID | `bili_favorite_content` 公开内容可读，不可见时返回错误；`bili_favorite_lists` 未登录且接口返回空时返回 `login_required` |
+| 公开收藏夹内容 | `bili_favorite_content` | 公开内容可读，不可见时返回错误 |
+| 收藏夹列表 | `bili_favorite_lists`（`uid=0` 或指定其他 UID） | 通常需要登录；匿名时 B 站返回空数据，工具返回 `login_required` |
 | 本地素材/工具 | `bili_self_image`、`bili_generate_image`、`bili_sticker_list`、`bili_video_zones`、`bili_activity_log` | 本地可用（`bili_generate_image` 未配置绘画 AI 时会返回失败） |
 | 字幕 | `bili_subtitle`；`bili_video_overview` / `bili_crawl` 的字幕部分 | **需要登录** |
-| 查自己的收藏夹 | `bili_favorite_lists(uid=0)` | **需要登录** |
 | 私有读取 | `bili_unread_messages`、`bili_recent_messages`、`bili_received_replies`、`bili_received_at_and_likes` | **需要登录** |
 | 写操作 / 投稿 | `bili_reply`、`bili_favorite`、`bili_send_dynamic`、`bili_send_opus`、`bili_send_message`、`bili_send_sticker`、`bili_upload_video`、`bili_upload_video_multi` | **需要登录**；前 6 个是 `write`，后 2 个投稿是 `human_only` |
 | 登录流程 | `bili_login`、`bili_login_check`、`bili_check_credential` | 不需要已有登录；`bili_check_credential` 未登录时返回 `logged_in: false` |
@@ -330,10 +330,10 @@ MCP Server 自身同样不执行这些策略，详见[安全与权限](#安全�
 
 | 工具 | 作用 | 主要参数（默认值） | 登录 | 清单 |
 |---|---|---|---|---|
-| `bili_search` | 搜索 B 站视频 | `keyword`；`num=10`；`order="totalrank"`（`totalrank`/`click`/`pubdate`/`dm`） | 公开 | `read` |
+| `bili_search` | 搜索 B 站视频 | `keyword`；`num=10`（最大 50）；`order="totalrank"`（`totalrank`/`click`/`pubdate`/`dm`） | 公开 | `read` |
 | `bili_comments` | 视频热门评论，含楼中楼和图片地址 | `bvid`；`num=30` | 公开 | `read` |
 | `bili_subtitle` | 获取字幕，优先中文 AI 字幕 | `bvid` | **必须** | `read` |
-| `bili_danmaku` | 获取弹幕 | `bvid`；`num=100` | 公开 | `read` |
+| `bili_danmaku` | 获取弹幕 | `bvid`；`num=100`（最大 1000） | 公开 | `read` |
 | `bili_video_info` | 视频详情；可用 `aid` 反查 BV 号 | `bvid=""`；`aid=0`（二选一，`bvid` 优先） | 公开 | `read` |
 | `bili_video_overview` | 字幕 + 密集联系表；可按时间窗口查看 | `bvid`；`page=1`；`max_frames=40`；`start=None`；`end=None` | 公开（字幕需登录） | `read` |
 | `bili_video_frames` | 按时间点抽取高清帧 | `bvid`；`times`；`page=1`；`max_frames=3`；`max_height=1080` | 公开 | `read` |
@@ -371,11 +371,11 @@ MCP Server 自身同样不执行这些策略，详见[安全与权限](#安全�
 |---|---|---|---|---|
 | `bili_video_zones` | 列出常用投稿分区 ID → 名称 | — | 本地 | `read` |
 | `bili_hot_videos` | 当前热门视频 | `pn=1`；`ps=20`（最大 50） | 公开 | `read` |
-| `bili_hot_buzzwords` | 热搜词 | `page_num=1`；`page_size=20` | 公开 | `read` |
+| `bili_hot_buzzwords` | 热搜词 | `page_num=1`；`page_size=20`（最大 50） | 公开 | `read` |
 | `bili_weekly_hot` | 每周必看 | `week=0`（0 返回期数列表，>0 返回该期视频） | 公开 | `read` |
 | `bili_rank` | 分区排行榜 | `category="all"`；`day=3`（3 或 7） | 公开 | `read` |
 | `bili_user_info` | 用户资料、粉丝数和 UP 主累计数据 | `uid` | 公开（累计数据需登录） | `read` |
-| `bili_user_videos` | 用户投稿列表 | `uid`；`pn=1`；`ps=30`；`order="pubdate"`（`pubdate`/`click`/`stow`）；`keyword=""` | 公开 | `read` |
+| `bili_user_videos` | 用户投稿列表 | `uid`；`pn=1`；`ps=30`（最大 50）；`order="pubdate"`（`pubdate`/`click`/`stow`）；`keyword=""` | 公开 | `read` |
 | `bili_space_dynamics` | 用户最近的图文、转发和视频动态 | `uid`；`limit=5`（最大 20） | 公开（接口可能要求登录） | `read` |
 
 `bili_rank` 的 `category` 可取：`all`、`original`、`rookie`、`douga`、`music`、`dance`、`game`、`knowledge`、`technology`、`sports`、`car`、`life`、`food`、`animal`、`fashion`、`ent`、`cinephile`。

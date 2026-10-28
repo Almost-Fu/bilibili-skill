@@ -500,12 +500,13 @@ async def bili_search(
 
     Args:
         keyword: 搜索词
-        num: 最多返回多少条，默认 10
+        num: 最多返回多少条，默认 10，最大 50
         order: totalrank=综合、click=播放、pubdate=最新、dm=弹幕
 
     Returns:
         JSON：keyword、count 和视频列表
     """
+    num = max(1, min(int(num), 50))
     result = await search.search_by_type(
         keyword=keyword,
         search_type=search.SearchObjectType.VIDEO,
@@ -548,6 +549,7 @@ async def bili_comments(bvid: str, num: int = 30) -> str:
     Returns:
         JSON：bvid、count 和 comments
     """
+    num = max(1, int(num))
     cred, _client, info = await _open_video(bvid, require_login=False)
     oid = info["aid"]
 
@@ -657,11 +659,12 @@ async def bili_danmaku(bvid: str, num: int = 100) -> str:
 
     Args:
         bvid: 视频 BV 号
-        num: 最多返回多少条，默认 100
+        num: 最多返回多少条，默认 100，最大 1000
 
     Returns:
         JSON：bvid、count 和 danmakus
     """
+    num = max(1, min(int(num), 1000))
     _cred, client, _info = await _open_video(bvid, require_login=False)
     items = await client.get_danmakus(page_index=0)
     picked = [
@@ -684,9 +687,21 @@ async def bili_video_info(bvid: str = "", aid: int = 0) -> str:
     """
     if not bvid and not aid:
         return _json({"error": "请提供 bvid 或 aid"})
-    _cred, client, info = await _open_video(
-        bvid, aid=aid, require_login=False
-    )
+    try:
+        _cred, client, info = await _open_video(
+            bvid, aid=aid, require_login=False
+        )
+    except (ValueError, IndexError, KeyError):
+        # 非法 BV 号在 bilibili-api 里可能抛 list.index 的 ValueError；
+        # 统一转成结构化错误，不把库内部异常文本抛给宿主。
+        return _json(
+            {
+                "success": False,
+                "error": "BV 号或 aid 无效，或视频不存在",
+            }
+        )
+    except Exception as exc:
+        return _json({"success": False, "error": f"获取视频信息失败：{exc}"})
     stat = info.get("stat") or {}
     # get_info() 不返回标签，需要单独请求；失败时保持空列表，不影响详情。
     tag_rows = info.get("tag")
@@ -823,6 +838,10 @@ async def bili_video_overview(
 
     storyboard = None
     dense_failure = ""
+    # 整段模式必须把 None 传下去，让底层按全片均匀降频；如果传
+    # (0, duration)，底层会把它当成“两分钟窗口”而截断到前 120 秒。
+    story_start = begin if windowed else None
+    story_end = finish if windowed else None
     if has_pyav() and duration > 0:
         try:
             playurl = await client.get_download_url(cid=cid)
@@ -832,8 +851,8 @@ async def bili_video_overview(
                 duration,
                 playurl,
                 max_frames=max_frames,
-                start=begin,
-                end=finish,
+                start=story_start,
+                end=story_end,
             )
         except Exception as exc:
             dense_failure = type(exc).__name__
@@ -845,8 +864,8 @@ async def bili_video_overview(
                 cid,
                 max_frames=min(max(1, int(max_frames or 1)), 24),
                 duration=duration,
-                start=begin,
-                end=finish,
+                start=story_start,
+                end=story_end,
             )
             if dense_failure:
                 storyboard["fallback_reason"] = dense_failure
@@ -1062,6 +1081,8 @@ async def bili_crawl(
     Returns:
         JSON：keyword、视频数、评论总数和每个视频的采集结果
     """
+    max_videos = max(1, int(max_videos))
+    comments_per_video = max(1, int(comments_per_video))
     found = await search.search_by_type(
         keyword=keyword,
         search_type=search.SearchObjectType.VIDEO,
@@ -1635,7 +1656,9 @@ async def bili_hot_videos(pn: int = 1, ps: int = 20) -> str:
     Returns:
         JSON：page、count 和 videos
     """
-    response = await hot.get_hot_videos(pn=pn, ps=min(ps, 50))
+    pn = max(1, int(pn))
+    ps = max(1, min(int(ps), 50))
+    response = await hot.get_hot_videos(pn=pn, ps=ps)
     videos: list[dict[str, Any]] = []
     for row in response.get("list", []):
         stat = row.get("stat") or {}
@@ -1664,11 +1687,13 @@ async def bili_hot_buzzwords(
 
     Args:
         page_num: 页码，默认 1
-        page_size: 每页数量，默认 20
+        page_size: 每页数量，默认 20，最大 50
 
     Returns:
         热搜接口的原始 JSON 数据
     """
+    page_num = max(1, int(page_num))
+    page_size = max(1, min(int(page_size), 50))
     response = await hot.get_hot_buzzwords(
         page_num=page_num, page_size=page_size
     )
@@ -1827,13 +1852,15 @@ async def bili_user_videos(
     Args:
         uid: 用户 UID
         pn: 页码，默认 1
-        ps: 每页数量，默认 30
+        ps: 每页数量，默认 30，最大 50
         order: pubdate=最新、click=播放、stow=收藏
         keyword: 在该用户投稿里搜索
 
     Returns:
         JSON：uid、page、total、count 和 videos
     """
+    pn = max(1, int(pn))
+    ps = max(1, min(int(ps), 50))
     cred = await get_cred_optional()
     account = user.User(uid=uid, credential=cred)
     order_map = {

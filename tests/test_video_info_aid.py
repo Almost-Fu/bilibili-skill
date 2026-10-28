@@ -67,3 +67,18 @@ class VideoInfoAidTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("bvid 或 aid", data["error"])
         self.assertEqual(FakeVideo.calls, [])
+
+    async def test_非法bvid返回结构化错误(self):
+        with patch.object(
+            mcp_server,
+            "_open_video",
+            AsyncMock(side_effect=ValueError("'l' is not in list")),
+        ):
+            data = json.loads(
+                await mcp_server.bili_video_info(bvid="BVinvalid999")
+            )
+
+        self.assertFalse(data["success"])
+        self.assertIn("BV 号或 aid 无效", data["error"])
+        self.assertNotIn("is not in list", data["error"])
+        self.assertFalse(data["error"].startswith("Error executing tool"))
